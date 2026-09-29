@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {PGlite} from '@electric-sql/pglite';
+import {demoState,DEMO_NOW} from '../lib/engine/demo';
+import type {State} from '../lib/engine/types';
+import {id,unmatch} from '../lib/engine/ledger';
+const sql=await readFile(new URL('../supabase/migrations/202609280001_initial_ledger.sql',import.meta.url),'utf8');
+test('PostgreSQL migration, immutable histories, atomic invariants and concurrency',async t=>{
+ const db=new PGlite();await db.exec('create role anon; create role authenticated; create role service_role;');await db.exec(sql);const state=demoState();state.revision=0;
+ const commit=async(s:State,expected:number)=>db.query<{revision:number}>('select public.ledger_commit($1,$2,$3::jsonb) as revision',['owner',expected,JSON.stringify(s)]);
+ const snapshot=async()=>(await db.query<{state:State}>('select public.ledger_snapshot($1) as state',['owner'])).rows[0].state;
+ await t.test('migration accepts the real acceptance fixture and roundtrips all relations',async()=>{const result=await commit(state,0);assert.equal(result.rows[0].revision,1);const actual=await snapshot();assert.equal(actual.transactions.length,20);assert.equal(actual.allocations.length,19);assert.equal(actual.rentRates.length,4);assert.equal(actual.user.id,'owner');});
+ await t.test('second unmodified commit succeeds with unchanged immutable rows',async()=>{const s=await snapshot();const r=await commit(s,1);assert.equal(r.rows[0].revision,2);});
+ await t.test('stale writers fail without overwriting the current ledger',async()=>{await assert.rejects(()=>commit(state,1),/revision_conflict/);assert.equal((await snapshot()).revision,2);});
+ await t.test('database rejects a bank over-allocation atomically',async()=>{const s=await snapshot();const tx=s.transactions.find(t=>t.status==='Matched'&&t.direction==='credit')!;const a=s.allocations.find(a=>a.transactionId===tx.id)!;s.allocations.push({...a,id:id(),amountCents:1});await assert.rejects(()=>commit(s,2),/invalid bank allocation/);assert.equal((await snapshot()).revision,2);assert.equal((await snapshot()).allocations.length,19);});
+ await t.test('history cannot be rewritten through the commit RPC',async()=>{const s=await snapshot();s.rents[0].amountCents++;await assert.rejects(()=>commit(s,2),/rent history is immutable/);assert.equal((await snapshot()).revision,2);});
+ await t.test('bill split must conserve the original amount at the database boundary',async()=>{const s=await snapshot();s.bills[0].ownerShareCents=1;await assert.rejects(()=>commit(s,2),/bill split does not conserve money/);assert.equal((await snapshot()).revision,2);});
+ await t.test('unmatching retains original allocations and money remains consistent',async()=>{const s=await snapshot();const tx=s.transactions.find(t=>t.status==='Matched'&&t.direction==='credit')!;unmatch(s,tx.id,'Owner correction',new Date(DEMO_NOW));await commit(s,2);const actual=await snapshot();assert.equal(actual.allocations.length,19);assert.equal(actual.allocations.filter(a=>!a.active).length,1);assert.equal(actual.revision,3);});
+ await t.test('anonymous and authenticated browser roles have no table or RPC privilege',async()=>{const r=await db.query<{table_ok:boolean;rpc_ok:boolean}>("select has_table_privilege('anon','public.bank_transaction','select') as table_ok,has_function_privilege('authenticated','public.ledger_snapshot(text)','execute') as rpc_ok");assert.equal(r.rows[0].table_ok,false);assert.equal(r.rows[0].rpc_ok,false);});
+ await t.test('one owner cannot commit a different owner state',async()=>{const s=await snapshot();s.user.id='someone-else';await assert.rejects(()=>commit(s,3),/owner mismatch/);});
+ await t.test('webhook event uniqueness persists across repeated commits',async()=>{const s=await snapshot();s.webhookEvents.push({id:id(),providerEventId:'evt_1',type:'transactions.synced',receivedAt:DEMO_NOW,processedAt:null});await commit(s,3);const actual=await snapshot();actual.webhookEvents.push({...actual.webhookEvents[0],id:id()});await assert.rejects(()=>commit(actual,4),/unique_webhook_event/);});
+ await t.test('scheduled jobs use expiring mutually exclusive leases',async()=>{const token=id();const q=async(k:string)=>(await db.query<{ok:boolean}>('select claim_job($1,$2,$3) as ok',['bank-sync',k,240])).rows[0].ok;assert.equal(await q(token),true);assert.equal(await q(id()),false);await db.query('select release_job($1,$2)',['bank-sync',token]);assert.equal(await q(id()),true);});
+ await t.test('persistent login throttle stops the eleventh attempt',async()=>{for(let i=0;i<11;i++){const result=await db.query<{ok:boolean}>('select login_allowed($1) as ok',['owner']);assert.equal(result.rows[0].ok,i<10);}});
+ await db.close();
+});
