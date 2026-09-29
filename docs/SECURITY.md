@@ -1,0 +1,17 @@
+# Security boundaries
+
+- Production is HTTPS-only and single-owner. PBKDF2-SHA256 hashes (600,000 iterations with random salt) are generated locally; only the hash is deployed. Session cookies are HttpOnly, Secure in production, SameSite=Strict and expire after 12 hours. A separate 32-byte secret signs each session with HMAC-SHA256.
+- Every protected data read/write/export/account/sync route checks server-side owner authentication. Browser visibility is not used as authorisation. The optional Sites auth mode additionally checks an explicit owner email allowlist and must never be enabled on Vercel, where incoming identity headers are not trustworthy.
+- State-changing owner routes require JSON, a matching configured Origin and same-origin fetch metadata. Session cookies are not readable by JavaScript. Cross-origin CORS access is not enabled.
+- Webhooks use a separate signature authentication boundary. Jobs use a separate constant-time bearer-token check. Neither can be invoked as a browser financial mutation.
+- Bank and database API keys exist only in server environment secrets. No NEXT_PUBLIC credentials, client bank API calls, banking passwords, scraping or payment initiation.
+- PostgreSQL stores money as bounded fixed integer cents. RPC functions use a fixed search_path, fixed table references and parameterized inputs. RLS is enabled; browser roles have no table or financial RPC access. SQL queries are not concatenated with user input.
+- Financial commitments are atomic with a revision check and allocation invariants. Immutable history triggers protect prior obligations, allocations and audit/rate records. Bank/event uniqueness is enforced at the database level.
+- React escapes user/provider strings. No dangerouslySetInnerHTML is used. Next.js response headers set nosniff, a same-origin referrer policy, HSTS, frame denial and a restrictive CSP. The static CSP permits inline framework scripts/styles; a future nonce-based CSP would further reduce inline-script exposure. No third-party analytics/scripts are added.
+- CSV text cells neutralise formula prefixes; currency cells are generated from integer cents. Untrusted supplier/tenant descriptions cannot become spreadsheet formulas.
+- Provider pagination is pinned to the official API origin and versioned path. Redirects are rejected; response schema and currency/direction are validated. Consent redirects are restricted to the official hosted link domain.
+- API/credential payloads are not logged. Error messages expose status/code and recovery guidance, not keys or raw banking responses. Only necessary reference/description/counterparty data is stored in the ledger.
+- Login attempts are throttled persistently for the owner account; no client IP header is trusted to bypass the limit. Because it is a personal login, an attacker can temporarily exhaust the global attempt bucket; host-level rate limiting can reduce that denial-of-service risk.
+- The public demo never reads or writes the real ledger; its provider-shaped fixtures are generated in a separate sample path. It does not represent a live bank connection. Setup pages disclose configuration requirements, not credential values.
+
+Not claimed: an independent security audit, penetration test, accreditation for this app, or a live-bank end-to-end test. Provider compliance statements apply to Redbark/Fiskil and their own services, not to this code. Keep dependencies current and restrict access to the Supabase and Vercel administrative accounts.
