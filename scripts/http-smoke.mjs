@@ -1,0 +1,11 @@
+import {spawn} from 'node:child_process';
+import assert from 'node:assert/strict';
+const server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port','3100'],{stdio:['ignore','pipe','pipe'],env:{...process.env,AUTH_MODE:'password',SUPABASE_URL:'',SUPABASE_SERVICE_ROLE_KEY:'',SESSION_SECRET:'',OWNER_PASSWORD_HASH:'',REDBARK_API_KEY:'',CRON_SECRET:'',APP_ORIGIN:'https://rentledger.example'}});
+let output='';server.stdout.on('data',x=>output+=x.toString());server.stderr.on('data',x=>output+=x.toString());
+try {
+ await new Promise((resolve,reject)=>{const timer=setInterval(()=>{if(output.includes('Ready in')){clearInterval(timer);resolve();}else if(server.exitCode!==null){clearInterval(timer);reject(new Error('Production server did not start.'));}},100);setTimeout(()=>{clearInterval(timer);reject(new Error('Production server startup timed out.'));},20000).unref();});
+ const routes=['/','/demo','/demo/tenants','/demo/rent','/demo/bills','/demo/transactions','/demo/reports','/demo/settings','/deployment'];
+ for(const route of routes){const r=await fetch('http://127.0.0.1:3100'+route);const text=await r.text();assert.equal(r.status,200,route);assert.ok(text.includes('rentledger'),route);assert.equal(text.includes('NEXT_NOT_FOUND'),false,route);if(route==='/demo'){assert.ok(text.includes('Sample workspace'));assert.ok(text.includes('Sarah Mitchell'));assert.ok(text.includes('$740'));}console.log(`PASS rendered ${route}`);}
+ for(const [path,method] of [['/api/state','GET'],['/api/action','POST'],['/api/export?from=2026-09-01&to=2026-09-30','GET'],['/api/bank/accounts','POST'],['/api/bank/connect','POST'],['/api/bank/sync','POST'],['/api/jobs/run','GET'],['/api/webhooks/redbark','POST']]){const r=await fetch('http://127.0.0.1:3100'+path,{method,...(method==='POST'?{headers:{'Content-Type':'application/json'},body:'{}'}:{})});assert.equal(r.status,401,path);console.log(`PASS unauthorised ${method} ${path}`);}
+ const r=await fetch('http://127.0.0.1:3100/');assert.ok(r.headers.get('content-security-policy')?.includes("object-src 'none'"));assert.ok(r.headers.get('strict-transport-security'));console.log('PASS production security headers');
+} finally {server.kill('SIGTERM');}
