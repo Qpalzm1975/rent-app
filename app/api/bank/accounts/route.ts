@@ -1,0 +1,4 @@
+import { requireOwner,sameOrigin } from '@/lib/server/auth';
+import { refreshDirectory } from '@/lib/server/sync';
+import { json,failure } from '@/lib/server/http';
+export async function POST(req:Request){try{await requireOwner();sameOrigin(req);const {state}=await refreshDirectory();return json(state);}catch(e){return failure(e);}}
