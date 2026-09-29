@@ -1,0 +1,7 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "pnpm build:vercel",
+  "regions": ["syd1"],
+  "functions": { "app/api/**/route.ts": { "maxDuration": 300 } },
+  "crons": [{ "path": "/api/jobs/run", "schedule": "*/30 * * * *" }]
+}
