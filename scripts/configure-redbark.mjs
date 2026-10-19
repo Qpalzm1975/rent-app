@@ -14,7 +14,7 @@ if(!destination.config?.signing_secret)throw new Error('No signing secret return
 // Save the one-time secret immediately in an ignored, owner-readable file.
 const filename='.env.redbark.local';await writeFile(filename,`REDBARK_WEBHOOK_SECRET=${destination.config.signing_secret}\n`,{mode:0o600,flag:'wx'});
 console.log(`Signing secret saved to ${filename}. Add it to your hosting environment before enabling delivery.`);
-const event=await api('/event_destinations',{name:'Rentledger consent and lifecycle',webhook_endpoint:{url},enabled_events:['connection.*','sync_run.failed','event_destination.disabled']});
+const event=await api('/event_destinations',{name:'Rentledger consent and lifecycle',webhook_endpoint:{url},enabled_events:['connection.*','sync.attention','sync_run.failed','sync_run.succeeded','destination.disabled','event_destination.disabled']});
 if(event.webhook_endpoint?.signing_secret)await writeFile(filename,`REDBARK_EVENT_SECRET=${event.webhook_endpoint.signing_secret}\n`,{mode:0o600,flag:'a'});
 const from=new Date(Date.now()-90*86400000).toISOString().slice(0,10);
 const sync=await api('/syncs',{type:'transactions',name:'Rentledger live bank feed',destination:destination.id,accounts:selected.map(a=>a.id),options:{data_from:from,include_pending:false,mask_account_numbers:true},run_now:false});

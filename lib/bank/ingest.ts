@@ -26,7 +26,7 @@ export function ingestDirectory(s:State,connections:ProviderConnection[],account
  for(const a of accounts){const c=s.connections.find(c=>c.providerId===a.connection);if(!c)continue;const old=s.accounts.find(x=>x.providerId===a.id);if(old){old.name=a.name;old.maskedNumber=a.account_number??'';}else s.accounts.push({id:id(),connectionId:c.id,providerId:a.id,name:a.name,maskedNumber:a.account_number??'',currency:a.currency,selected:false,propertyId:null,balanceCents:null,balanceObservedAt:null,balanceFreshness:null,lastSyncedAt:null,coverageFrom:null});}
  // A formerly known connection missing from a successful provider listing is
  // no longer treated as healthy. Historical local records remain intact.
- for(const c of s.connections)if(!connections.some(p=>p.id===c.providerId)){c.status='revoked';c.error='The connection is no longer returned by Redbark. Reconnect or renew consent.';}
+ for(const c of s.connections)if(!connections.some(p=>p.id===c.providerId)&&c.status!=='revoked'){c.status='revoked';c.error='The connection is no longer returned by Redbark. Reconnect or renew consent.';}
 }
 export function applyBalance(s:State,accountId:string,b:ProviderBalance){const a=s.accounts.find(a=>a.id===accountId);if(a){a.balanceCents=b.current&&b.current.currency==='aud'?b.current.amount:null;a.balanceObservedAt=b.observed_at;a.balanceFreshness=b.freshness;}}
 // A pending row the bank no longer reports inside a fully fetched window has

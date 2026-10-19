@@ -8,6 +8,10 @@ import { audit,generateRent,notify,reconcileNotifications } from '../engine/ledg
 import { matchAll } from '../engine/matching';
 export const bankClient=()=>new RedbarkClient(env('REDBARK_API_KEY'),env('REDBARK_API_VERSION')||undefined);
 export async function refreshDirectory(){const client=bankClient();const [connections,accounts]=await Promise.all([client.connections(),client.accounts()]);return mutate(s=>{ingestDirectory(s,connections,accounts);reconcileNotifications(s);});}
+// Events that can mean new or changed bank data trigger a full history sweep;
+// lifecycle-only events (sync runs, destination health, pings) need only the
+// normal incremental window.
+const FULL_SWEEP_EVENTS=new Set(['transactions.synced','connection.created','connection.refreshed']);
 function inactiveConsentMessage(status:string){return status==='pending'?'Your bank is still preparing this connection (Redbark status: pending). Rentledger retries automatically.':`Bank consent is not active (Redbark status: ${status}). Renew the connection in Settings.`;}
 export interface SyncResult{busy:boolean;imported:number;foreignSkipped?:number;success?:boolean;reason?:'bank_not_configured'}
 export async function runSync():Promise<SyncResult>{
@@ -22,7 +26,7 @@ export async function runSync():Promise<SyncResult>{
   if(pendingEvents.length)await mutate(s=>applyEventNotices(s,pendingEvents.map(e=>e.type)));
   // The superseded bank status needs migration 202610190001; older schemas keep pending rows as they are.
   const supportsSuperseded=(state.schemaVersion??1)>=2;
-  const full=!state.audit.some(a=>a.event==='full_sync_completed'&&Date.parse(a.createdAt)>Date.now()-86400000)||pendingEventIds.length>0;
+  const full=!state.audit.some(a=>a.event==='full_sync_completed'&&Date.parse(a.createdAt)>Date.now()-86400000)||pendingEvents.some(e=>FULL_SWEEP_EVENTS.has(e.type));
   // Redbark filters bare dates in its own time zone, which can be ahead of the
   // property's, so each sweep asks for one extra day.
   const end=addDays(today,1);

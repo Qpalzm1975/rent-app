@@ -2,7 +2,7 @@
 import {ArrowUpRight,Check,ChevronRight,Wallet,ArrowDownLeft,TriangleAlert,Receipt,Landmark,Plus,ShieldCheck} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {useLedger} from './context';
-import {Metric,Money,Avatar,Status,Section,LedgerTable,Row,Cell,Empty} from './ui';
+import {Metric,Money,Avatar,Status,Section,LedgerTable,Row,Cell,Empty,bankLabel} from './ui';
 import {addDays,dateLabel,localDate,rangeFor,weekStart} from '@/lib/engine/dates';
 import {dashboard,report} from '@/lib/engine/reporting';
 import {available,bankFresh,paid,statusOf} from '@/lib/engine/ledger';
@@ -40,7 +40,7 @@ export function Dashboard(){
   </div>
   <Section title="Recent transactions" action={<button className="text-link" onClick={()=>go('transactions')}>View all transactions <ArrowUpRight size={15}/></button>}>
    {latest.length?<LedgerTable headers={['Transaction','Date','Amount','Allocation','']}>
-    {latest.map(t=><Row key={t.id} className="click-row" onClick={()=>openTransaction(t.id)}><Cell><div className="transaction-desc"><span className={'tx-icon '+t.direction}>{t.direction==='credit'?<ArrowDownLeft size={17}/>:<ArrowUpRight size={17}/>}</span><div><b>{t.description}</b><small>{s.accounts.find(a=>a.id===t.accountId)?.name}</small></div></div></Cell><Cell>{dateLabel(t.postedDate??t.date)}</Cell><Cell><Money value={t.direction==='credit'?t.amountCents:-t.amountCents} className={t.direction==='credit'?'text-green':''}/></Cell><Cell><Status value={t.status}/></Cell><Cell><ChevronRight size={16}/></Cell></Row>)}
+    {latest.map(t=><Row key={t.id} className="click-row" onClick={()=>openTransaction(t.id)}><Cell><div className="transaction-desc"><span className={'tx-icon '+t.direction}>{t.direction==='credit'?<ArrowDownLeft size={17}/>:<ArrowUpRight size={17}/>}</span><div><b>{t.description}</b><small>{s.accounts.find(a=>a.id===t.accountId)?.name}</small></div></div></Cell><Cell>{dateLabel(t.postedDate??t.date)}</Cell><Cell><Money value={t.direction==='credit'?t.amountCents:-t.amountCents} className={t.direction==='credit'?'text-green':''}/></Cell><Cell><Status value={bankLabel(t)}/></Cell><Cell><ChevronRight size={16}/></Cell></Row>)}
    </LedgerTable>:<Empty title="Waiting for your first bank sync" detail="Transactions appear here automatically after you connect and select your bank account."/>}
   </Section>
   <div className="dashboard-small-totals"><button onClick={()=>go('bills')}>{dueBills.length} bills to pay · <Money value={sum(dueBills.map(b=>b.amountCents-paid(s,'expense',b.id)))}/></button><button onClick={()=>go('bills')}>Property bills paid · <Money value={expensePaid}/></button><span>All amounts in AUD</span></div>
