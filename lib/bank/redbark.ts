@@ -2,7 +2,9 @@ import { z } from 'zod';
 import { addDays,daysBetween,validDate } from '../engine/dates';
 const nullableText=z.string().nullable();
 const date=z.string().refine(validDate);
-const money=z.object({amount:z.number().int().safe(),currency:z.literal('aud')});
+// Integer minor units. A transaction's own currency may differ from its AUD
+// account (Redbark docs), so parsing accepts any ISO code and ingestion decides.
+const money=z.object({amount:z.number().int().safe(),currency:z.string().regex(/^[a-z]{3}$/)});
 export const transactionSchema=z.object({id:z.string().min(1),account:z.string().min(1),status:z.enum(['posted','pending']),date,post_date:date.nullable(),description:z.string(),reference:nullableText,extended_description:nullableText,merchant_name:nullableText,amount:money,direction:z.enum(['credit','debit']),livemode:z.literal(true)}).passthrough();
 export type ProviderTransaction=z.infer<typeof transactionSchema>;
 export const connectionSchema=z.object({id:z.string(),provider:z.literal('fiskil'),category:z.literal('banking'),institution:z.object({name:z.string()}).nullable(),status:z.enum(['pending','active','expiring','expired','invalidated','revoked']),consent:z.object({expires_at:nullableText}).nullable(),last_refreshed_at:nullableText,livemode:z.literal(true)}).passthrough();
@@ -13,13 +15,26 @@ export const balanceSchema=z.object({account:z.string(),current:money.nullable()
 export type ProviderBalance=z.infer<typeof balanceSchema>;
 const BASE='https://api.redbark.com/v2';
 export const REDBARK_VERSION='2026-10-01.wattle';
-export class ProviderError extends Error{constructor(public status:number,public code:string){super(`Redbark ${status}: ${code}. Check bank consent, key scopes and connection status.`);}}
+const RETRY_LATER=new Set(['rate_limit_exceeded','upstream_rate_limited','provider_wait','too_many_concurrent_requests','balance_refresh_limited','upstream_unavailable','gateway_unavailable','upstream_timeout','internal_error','retry_exhausted']);
+// Owner-facing guidance for the documented v2 error codes. Status and code are
+// kept on the error so callers can decide what is fatal for a sync.
+function guidance(status:number,code:string){
+ if(code==='upstream_auth_failed')return 'Your bank rejected the connection. Renew consent in Settings → Bank connection.';
+ if(code==='account_unavailable')return 'Your bank is not currently sharing this account. Check the accounts selected in your bank consent; Rentledger will retry automatically.';
+ if(RETRY_LATER.has(code)||status===429||status>=500)return `Redbark or your bank is temporarily unavailable (${code}). The next scheduled sync retries automatically.`;
+ if(code==='api_key_invalid'||code==='api_key_missing'||status===401)return 'Redbark rejected the API key. Check REDBARK_API_KEY in the server environment.';
+ if(code==='insufficient_scope')return 'The Redbark API key is missing a scope. The app key needs data:read, connections:read and connections:write.';
+ if(code==='plan_upgrade_required'||code==='subscription_required')return 'Your Redbark plan or subscription does not currently include API access.';
+ if(code.startsWith('version_'))return `Redbark rejected the API version (${code}). Check REDBARK_API_VERSION against Redbark's current documentation.`;
+ return `Redbark ${status}: ${code}. Check bank consent, key scopes and connection status.`;
+}
+export class ProviderError extends Error{constructor(public status:number,public code:string){super(guidance(status,code));}get retryable(){return RETRY_LATER.has(this.code)||this.status===429||this.status>=500;}}
 export class RedbarkClient {
  constructor(private key:string,private version=REDBARK_VERSION,private fetcher:typeof fetch=fetch){if(!key)throw new Error('Configure the server-side Redbark API key first.');}
- async request(path:string,body?:unknown,idempotencyKey?:string):Promise<{data:unknown;truncated:boolean}>{
+ async request(path:string,body?:unknown,idempotencyKey?:string,method:'GET'|'POST'|'DELETE'=body===undefined?'GET':'POST'):Promise<{data:unknown;truncated:boolean}>{
   const u=new URL(path.startsWith('https://')?path:BASE+path);if(u.origin!=='https://api.redbark.com'||!u.pathname.startsWith('/v2/')||u.username||u.password)throw new Error('Rejected unexpected Redbark URL.');
   for(let attempt=0;attempt<3;attempt++){
-   const r=await this.fetcher(u,{method:body===undefined?'GET':'POST',headers:{Authorization:`Bearer ${this.key}`,'Redbark-Version':this.version,...(body!==undefined?{'Content-Type':'application/json'}:{}),...(idempotencyKey?{'Idempotency-Key':idempotencyKey}:{})},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',redirect:'error',signal:AbortSignal.timeout(20000)});
+   const r=await this.fetcher(u,{method,headers:{Authorization:`Bearer ${this.key}`,'Redbark-Version':this.version,...(body!==undefined?{'Content-Type':'application/json'}:{}),...(idempotencyKey?{'Idempotency-Key':idempotencyKey}:{})},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',redirect:'error',signal:AbortSignal.timeout(20000)});
    if(!r.ok){const retry=Number(r.headers.get('Retry-After')??'1');if([429,500,503].includes(r.status)&&attempt<2&&Number.isFinite(retry)&&retry<=5){await new Promise(resolve=>setTimeout(resolve,Math.max(retry,1)*1000));continue;}const e=await r.json().catch(()=>null);const code=z.object({error:z.object({code:z.string().max(100)})}).safeParse(e);throw new ProviderError(r.status,code.success?code.data.error.code:'request_failed');}
    return {data:await r.json(),truncated:r.headers.get('X-Redbark-Truncated')==='true'};
   }
@@ -41,5 +56,8 @@ export class RedbarkClient {
   try{return await this.list(`/transactions?account=${encodeURIComponent(account)}&from=${from}&to=${to}&include_pending=true&limit=100`,transactionSchema);}
   catch(e){if(e instanceof ProviderError&&e.code==='transaction_window_truncated'&&from<to){const middle=addDays(from,Math.floor(daysBetween(from,to)/2));return [...await this.transactions(account,from,middle),...await this.transactions(account,addDays(middle,1),to)];}throw e;}
  }
+ // Withdraws consent at the provider (DELETE /v2/connections/{id}). Local ledger
+ // history is kept; the next directory refresh marks the connection revoked.
+ async revoke(connectionId:string){await this.request(`/connections/${encodeURIComponent(connectionId)}`,undefined,crypto.randomUUID(),'DELETE');}
  async link(returnUrl:string,connectionId?:string){const path=connectionId?`/connections/${encodeURIComponent(connectionId)}/reauthorize`:'/link_sessions';const body=connectionId?{return_url:returnUrl}:{provider:'fiskil',return_url:returnUrl};const result=z.object({url:z.string().url(),id:z.string()}).parse((await this.request(path,body,crypto.randomUUID())).data);const url=new URL(result.url);if(url.protocol!=='https:'||url.hostname!=='app.redbark.com')throw new Error('Redbark returned an unexpected consent address.');return result;}
 }

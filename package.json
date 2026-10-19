@@ -15,7 +15,7 @@
     "build:vercel": "next build",
     "dev:next": "next dev",
     "start:next": "next start",
-    "test": "node --import tsx --test tests/*.test.ts",
+    "test": "node --conditions=react-server --import tsx --test tests/*.test.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "schema:generate": "python scripts/generate-schema.py"
   },
