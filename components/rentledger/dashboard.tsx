@@ -5,7 +5,7 @@ import {useLedger} from './context';
 import {Metric,Money,Avatar,Status,Section,LedgerTable,Row,Cell,Empty,bankLabel} from './ui';
 import {addDays,dateLabel,localDate,rangeFor,weekStart} from '@/lib/engine/dates';
 import {dashboard,report} from '@/lib/engine/reporting';
-import {available,bankFresh,paid,statusOf} from '@/lib/engine/ledger';
+import {bankFresh,paid,statusOf} from '@/lib/engine/ledger';
 import {sum} from '@/lib/engine/money';
 export function Dashboard(){
  const {state:s,now,property,go,openTenant,openTransaction,openForm,demo}=useLedger();const today=localDate(now,s.settings.timezone),from=weekStart(today),to=addDays(from,6),m=dashboard(s,from,to,now,property||undefined);

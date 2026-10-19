@@ -1,5 +1,5 @@
 'use client';
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {LayoutDashboard,Users,CalendarDays,Receipt,ArrowLeftRight,ChartNoAxesCombined,Settings as SettingsIcon,Bell,ArrowUpRight,ShieldCheck,LogOut,House,ChevronRight,Check,BookOpen} from 'lucide-react';
 import {SidebarProvider,Sidebar,SidebarContent,SidebarHeader,SidebarFooter,SidebarMenu,SidebarMenuItem,SidebarMenuButton,SidebarInset,SidebarTrigger} from '@/components/ui/sidebar';
 import {Sheet,SheetContent,SheetHeader,SheetTitle,SheetDescription} from '@/components/ui/sheet';
@@ -9,19 +9,19 @@ import type {State} from '@/lib/engine/types';
 import {executeCommand} from '@/lib/engine/commands';
 import {localDate,rangeFor} from '@/lib/engine/dates';
 import {report} from '@/lib/engine/reporting';
-import {statusOf} from '@/lib/engine/ledger';
 import {LedgerContext,type Screen} from './context';
 import {Brand,Pick} from './ui';
 import {Dashboard} from './dashboard';
 import {Tenants,Rent,Bills,Transactions,Reports,Settings} from './screens';
 import {FormDialog,MatchTransaction,TenantLedger} from './forms';
 const NAV:[Screen,string,typeof House][]=[['dashboard','Dashboard',LayoutDashboard],['tenants','Tenants',Users],['rent','Rent',CalendarDays],['bills','Bills',Receipt],['transactions','Transactions',ArrowLeftRight],['reports','Reports',ChartNoAxesCombined],['settings','Settings',SettingsIcon]];
-export default function RentledgerApp({initialState,initialPage='dashboard',demo=false,clock,config}:{initialState:State;initialPage?:Screen;demo?:boolean;clock:string;config:Record<string,boolean>}){
- const [state,setState]=useState(initialState),[page,setPage]=useState<Screen>(initialPage),[filter,setFilter]=useState(''),[property,setProperty]=useState(initialState.properties[0]?.id??''),[busy,setBusy]=useState(false),[now,setNow]=useState(new Date(clock));
+export default function RentledgerApp({initialState,initialPage='dashboard',initialFilter='',demo=false,clock,config}:{initialState:State;initialPage?:Screen;initialFilter?:string;demo?:boolean;clock:string;config:Record<string,boolean>}){
+ const [state,setState]=useState(initialState),[page,setPage]=useState<Screen>(initialPage),[filter,setFilter]=useState(initialFilter),[property,setProperty]=useState(initialState.properties[0]?.id??''),[busy,setBusy]=useState(false),[now,setNow]=useState(new Date(clock));
  const [tenant,setTenant]=useState<string|null>(null),[transaction,setTransaction]=useState<string|null>(null),[form,setForm]=useState<{kind:string;id?:string}|null>(null),[notifications,setNotifications]=useState(false);
- const live=useRef({state,page});live.current={state,page};
+ // Event handlers and agent tools read the latest committed state through this ref.
+ const live=useRef({state,page});useLayoutEffect(()=>{live.current={state,page};},[state,page]);
  function go(next:Screen,nextFilter=''){setPage(next);setFilter(nextFilter);window.history.pushState({},'',`${demo?'/demo':''}/${next==='dashboard'?'':next}${nextFilter?'?filter='+encodeURIComponent(nextFilter):''}`);window.scrollTo({top:0,behavior:'smooth'});}
- useEffect(()=>{const params=new URLSearchParams(window.location.search);setFilter(params.get('filter')??'');const pop=()=>{const p=window.location.pathname.split('/').filter(Boolean).filter(x=>x!=='demo')[0]??'dashboard';if(NAV.some(n=>n[0]===p))setPage(p as Screen);setFilter(new URLSearchParams(window.location.search).get('filter')??'');};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop);},[]);
+ useEffect(()=>{const pop=()=>{const p=window.location.pathname.split('/').filter(Boolean).filter(x=>x!=='demo')[0]??'dashboard';if(NAV.some(n=>n[0]===p))setPage(p as Screen);setFilter(new URLSearchParams(window.location.search).get('filter')??'');};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop);},[]);
  async function reload(){if(demo)return;const r=await fetch('/api/state',{cache:'no-store'});if(r.status===401){window.location.reload();return;}if(!r.ok)return;setState(await r.json() as State);setNow(new Date());}
  useEffect(()=>{if(demo)return;const timer=setInterval(()=>{if(document.visibilityState==='visible')void reload()},60000);return()=>clearInterval(timer);},[demo]);
  async function request(path:string,body:unknown={}){if(demo){toast.info('Bank connections are available in your live workspace. Sample data stays separate.');return null;}setBusy(true);try{const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const v=await r.json() as {error?:string};if(!r.ok)throw new Error(v.error??'The request could not be completed.');return v;}catch(e){toast.error(e instanceof Error?e.message:'Request failed.');return null;}finally{setBusy(false);}}
