@@ -18,11 +18,11 @@
 
 `bank_connection` holds the provider reference, health and consent data; credentials are environment secrets. `bank_account` holds masked identifiers, balance observations, selected status and its property. `bank_transaction` stores the stable provider ID, account, signed direction, magnitude, posting date, relevant reference/counterparty text and current matching metadata. The unique key is owner + account + provider ID.
 
-`transaction_allocation` links credits to rent or bill shares and debits to bills/expense categories. All allocations are positive integer cents. Unmatching marks previous allocations inactive and records a reason/timestamp. Replacements create new allocation IDs. `tenant_transaction_alias` and `matching_rule` identify people deterministically. `notification` and `audit_log` support owner review; `webhook_event` is a durable deduplication queue. `job_lock` and `login_attempt` are operational support tables.
+`transaction_allocation` links credits to rent or bill shares and debits to bills/expense categories. All allocations are positive integer cents. Unmatching marks previous allocations inactive and records a reason/timestamp. Replacements create new allocation IDs. `tenant_transaction_alias` and `matching_rule` identify people deterministically. `notification` and `audit_log` support owner review; `webhook_event` is a durable deduplication queue. A bank transaction's `bankStatus` is `posted`, `pending` or `superseded` (a pending row the bank stopped reporting; kept, never allocated). `job_lock` and `login_attempt` are operational support tables.
 
 ## Atomic persistence
 
-The repository loads a typed `State` via `ledger_snapshot`, applies a pure command, then invokes `ledger_commit(expected_revision, state)`.
+The repository loads a typed `State` via `ledger_snapshot`, applies a pure command, then invokes `ledger_commit(expected_revision, state)`. From migration `202610190001` the snapshot is a bounded working set: every financial record, plus the newest 1,000 audit entries, open notifications and those resolved in the last 45 days, and unprocessed webhook events and those processed in the last 45 days. `ledger_commit` only inserts or updates the rows it receives, so rows outside the window are never touched or deleted. Verified webhook events are recorded by the narrow `record_webhook_event` RPC rather than a full load-and-commit.
 
 The commit acquires an owner advisory lock, verifies the expected revision, upserts normalized relational rows and validates all allocations/bill sums within **one PostgreSQL transaction**. Foreign keys are deferred until the commit. Financial-history triggers disallow changes to immutable amounts/rate snapshots/target IDs. All previous rows are retained: no application command deletes historical financial records. A stale writer gets SQLSTATE 40001 and the server reloads/recomputes the command, up to four attempts.
 
@@ -31,11 +31,11 @@ This makes cross-request financial races safe without relying on in-memory locks
 ## Matching policy
 
 1. Require a posted transaction on a selected property account with remaining value.
-2. For credits, find tenant identities using active whole-phrase aliases, explicit rules or a repeated exact reference previously confirmed manually twice. Amount and date cannot establish identity.
+2. For credits, find tenant identities using active whole-phrase aliases, explicit rules or a repeated exact reference previously confirmed manually twice. Amount and date cannot establish identity, and neither can text made only of generic words or numbers (“RENT”, “ROOM 2”): such text is rejected as an alias, enabled rule or remembered reference and is never learned.
 3. More than one identity means review. One identity with conflicting property means review.
 4. Consider outstanding obligations before the early-payment cutoff. Old debts remain eligible for late payments; oldest is the default within an unambiguous category.
 5. An exact combined outstanding total can cover rent and bills. Specific rent/bill references narrow the category. Competing equal amounts or uncertain partial mixed debt is reviewed.
-6. Exact contiguous multiweek rent prepayments can cover generated future weeks. Surplus stays tenant credit; later eligible debt may consume it.
+6. Exact contiguous multiweek rent prepayments can cover generated future weeks. Surplus stays tenant credit. On its first pass a payment is judged against obligations eligible on its own date; once it is known tenant money (part-allocated, or identified and held as credit), later passes let it pay obligations as they fall due, oldest first, so an early payment is never left beside an overdue week.
 7. For debits, require a supplier alias plus a single exact outstanding bill amount in the date window.
 8. Persist allocation reasons, confidence and source. Manual unmatch/reject disables automatic matching until retried; optional remembered references create editable rules.
 
@@ -45,7 +45,7 @@ Confidence is informational, not a probability. `97` reflects all required deter
 
 The scheduled job and webhook continuation share a 300-second leased lock. The worker has a 220-second ingestion budget and records failures rather than marking a partial fetch successful. Transaction windows are at most 30 calendar days. Responses are token paginated; a truncated provider range is bisected to avoid silent omission. New/changed rows are committed incrementally, but the account feed watermark advances only after its complete range and balance are retrieved.
 
-Webhook events are committed before HTTP acknowledgement. Delivery retries see the same durable provider event ID. The background continuation performs a REST reconciliation; it deliberately does not combine the old webhook transaction ID format with v2 IDs. Cron retries unprocessed events and periodically re-reads transaction history. Bank-side consent errors remain visible, and stored history stays available.
+Webhook events are recorded before HTTP acknowledgement whenever the database is reachable. Delivery retries see the same durable provider event ID. The background continuation performs a REST reconciliation; it deliberately does not combine the old webhook transaction ID format with v2 IDs. Cron retries unprocessed events and periodically re-reads transaction history (daily, and after `transactions.synced` or a new/renewed connection). After each fully fetched window, pending rows the provider no longer returns are marked superseded. A retryable balance error keeps the previous balance and does not fail the account; consent errors do. Bank-side consent errors remain visible, and stored history stays available.
 
 ## Time and reports
 
