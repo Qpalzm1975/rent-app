@@ -3,7 +3,6 @@ import { executeCommand } from './commands';
 import { id,generateRent,reconcileNotifications } from './ledger';
 import { ingestTransaction } from '../bank/ingest';
 import { matchAll } from './matching';
-import { addDays } from './dates';
 export const DEMO_NOW='2026-10-02T04:00:00.000Z';
 export function demoState(){
  const s=emptyState(),now=new Date(DEMO_NOW),propertyId=id(),connectionId=id(),accountId=id();s.settings.setupComplete=true;

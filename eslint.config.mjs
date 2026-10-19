@@ -15,14 +15,16 @@ const eslintConfig = defineConfig([
   ]),
   {
     // Every screen lives under one catch-all route (app/[[...slug]]) and is
-    // switched in client state with go(). The few internal <a> links leave that
-    // state on purpose (sample workspace <-> live ledger, the setup guide, the
-    // platform sign-in): a full document load guarantees that sample data and
-    // the live ledger never share a client instance and that the ledger is read
-    // again from the server. next/link would keep the client state.
+    // switched in client state with go(). The few internal <a> links and the
+    // reload after signing in or out leave that state on purpose (sample
+    // workspace <-> live ledger, the setup guide, the platform sign-in): a full
+    // document load guarantees that sample data and the live ledger never share
+    // a client instance and that the ledger is read again from the server.
+    // next/link and router.push() would keep the client state.
     files: ["app/**/*.tsx", "components/rentledger/**/*.tsx"],
     rules: {
       "@next/next/no-html-link-for-pages": "off",
+      "@next/next/no-location-assign-relative-destination": "off",
     },
   },
   {
