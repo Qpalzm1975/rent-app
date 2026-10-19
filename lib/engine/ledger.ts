@@ -32,6 +32,18 @@ export function generateRent(s:State,now=new Date(),refreshFuture=false){
   }
  }
 }
+// After a tenancy's dates change, retire every active obligation from `from`
+// onward whose amount no longer matches the tenancy (including weeks now wholly
+// outside it). Paid weeks are never rewritten: the owner must unmatch first.
+// generateRent() then issues the replacement weeks.
+export function retireChangedObligations(s:State,tenancyId:string,from:string,now=new Date()){
+ for(const r of s.rents.filter(r=>r.active&&!r.waived&&r.tenancyId===tenancyId&&r.periodEnd>=from)){
+  const next=amountForPeriod(s,tenancyId,r.periodStart,r.periodEnd);
+  if(next.amountCents===r.amountCents&&next.rateSnapshot===r.rateSnapshot)continue;
+  if(paid(s,'rent',r.id)>0)throw new Error('Unmatch the payment for the affected rent week first, then change the tenancy dates.');
+  r.active=false;audit(s,'rent_obligation_superseded',r.id,'Tenancy dates changed; original obligation retained.','owner',now);
+ }
+}
 export function bankFresh(s:State,propertyId:string,now=new Date()){
  const accounts=s.accounts.filter(a=>a.selected&&a.propertyId===propertyId);
  return accounts.length>0&&accounts.every(a=>{const c=s.connections.find(c=>c.id===a.connectionId);return c&&['active','expiring'].includes(c.status)&&!c.error&&a.lastSyncedAt&&now.getTime()-Date.parse(a.lastSyncedAt)<=s.settings.staleHours*3600000;});

@@ -5,6 +5,13 @@ import { allocate, available, paid, notify, type AllocationInput } from './ledge
 export function normalise(s:string){return s.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();}
 export function contains(text:string,alias:string){const a=normalise(alias);return a.length>=3&&(` ${normalise(text)} `).includes(` ${a} `);}
 export function textOf(t:BankTransaction){return [t.description,t.reference,t.counterparty].filter(Boolean).join(' ');}
+// Words that appear in many people's payments. Text made only of these words
+// (or bare numbers) cannot identify a tenant: "RENT", "ROOM 2" or "WEEKLY
+// PAYMENT" would otherwise attribute another person's money to whoever used it
+// first. Aliases, rules and learned references must contain a distinctive word.
+const GENERIC_WORDS=new Set(['A','ACC','ACCOUNT','ACCT','AND','APP','AUD','BANK','BANKING','BILL','BILLS','BOND','BPAY','CASH','CREDIT','DEBIT','DEP','DEPOSIT','DIRECT','ELEC','ELECTRICITY','FAST','FOR','FORTNIGHT','FORTNIGHTLY','FROM','GAS','HOME','HOUSE','IN','INCOMING','INSTANT','INTERNET','MISC','MOBILE','MONEY','MONTH','MONTHLY','MY','NBN','NETBANK','NPP','OF','ONLINE','OSKO','OTHER','OUT','PAID','PAY','PAYID','PAYMENT','PAYMENTS','PMT','POWER','PYMT','RECEIPT','REF','REFERENCE','RENT','RENTAL','RENTS','RM','ROOM','SAVINGS','SHARE','TFR','THANK','THANKS','THE','TO','TRANSACTION','TRANSFER','TRF','TXN','TY','UTILITIES','UTILITY','WATER','WEEK','WEEKLY','WEEKS','WIFI','WK','WKLY','XFER','YOU']);
+export function distinctive(text:string){return normalise(text).split(' ').some(word=>word.length>=2&&!GENERIC_WORDS.has(word)&&!/^\d+$/.test(word));}
+export function requireDistinctive(text:string,what:string){if(!distinctive(text))throw new Error(`${what} “${text.trim()}” is too generic to identify a tenant. Include a name or a reference only this tenant uses.`);}
 function review(s:State,t:BankTransaction,reasons:string[],now:Date){t.status='Needs Review';t.reasons=reasons;t.confidence=40;notify(s,`review:${t.id}`,'review','Payment needs your review',`${t.description}: ${reasons.join('; ')}`,'/transactions?status=Needs%20Review',now);}
 function identities(s:State,t:BankTransaction){
  const text=textOf(t),evidence=new Map<string,string[]>();const add=(tenantId:string,reason:string)=>{evidence.set(tenantId,[...(evidence.get(tenantId)??[]),reason]);};
@@ -12,7 +19,7 @@ function identities(s:State,t:BankTransaction){
  for(const r of s.rules.filter(r=>r.enabled)){const hay=r.field==='any'?text:t[r.field];if(r.mode==='equals'?normalise(hay)===normalise(r.text):contains(hay,r.text))add(r.tenantId,`Your ${r.field} rule matched “${r.text}”`);}
  // Only repeated, manually confirmed exact references can establish identity.
  // Amounts and recurring dates alone NEVER establish identity.
- if(t.reference.trim().length>=4){const history=s.transactions.filter(p=>p.id!==t.id&&p.reference&&normalise(p.reference)===normalise(t.reference)&&p.tenantId&&s.allocations.some(a=>a.active&&a.transactionId===p.id&&a.source==='manual'));
+ if(t.reference.trim().length>=4&&distinctive(t.reference)){const history=s.transactions.filter(p=>p.id!==t.id&&p.reference&&normalise(p.reference)===normalise(t.reference)&&p.tenantId&&s.allocations.some(a=>a.active&&a.transactionId===p.id&&a.source==='manual'));
   const ids=[...new Set(history.map(x=>x.tenantId!))];if(ids.length===1&&history.length>=2)add(ids[0],'Same reference was manually confirmed at least twice');}
  return evidence;
 }
@@ -33,7 +40,12 @@ export function matchTransaction(s:State,t:BankTransaction,now=new Date()){
  const [tenantId,reasons]=[...evidence][0];
  const tenancies=s.tenancies.filter(x=>x.tenantId===tenantId&&s.rooms.some(r=>r.id===x.roomId&&r.propertyId===account.propertyId));
  if(!tenancies.length){review(s,t,['Tenant identity matches but property does not'],now);return;}
- const eligibilityDate=s.allocations.some(a=>a.active&&a.transactionId===t.id)?[t.date,localDate(now,s.settings.timezone)].sort().at(-1)!:t.date;
+ // First pass: judge the payment against obligations eligible on its own date.
+ // Once it is known tenant money (part-allocated, or identified and held as
+ // credit), the remainder also pays obligations that have since fallen due,
+ // oldest first, so an early payment is never left beside an "overdue" week.
+ const heldCredit=t.tenantId===tenantId||s.allocations.some(a=>a.active&&a.transactionId===t.id);
+ const eligibilityDate=heldCredit?[t.date,localDate(now,s.settings.timezone)].sort().at(-1)!:t.date;
  const allDebts:Debt[]=[...s.rents.filter(r=>r.active&&!r.waived&&r.tenantId===tenantId&&r.propertyId===account.propertyId).map(r=>({kind:'rent' as const,id:r.id,dueDate:r.dueDate,remaining:r.amountCents-paid(s,'rent',r.id),label:'Rent'})),...s.billShares.filter(b=>b.active&&!b.waived&&b.tenantId===tenantId&&s.bills.some(x=>x.id===b.billId&&x.active&&x.propertyId===account.propertyId)).map(b=>({kind:'reimbursement' as const,id:b.id,dueDate:b.dueDate,remaining:b.amountCents-paid(s,'reimbursement',b.id),label:s.bills.find(x=>x.id===b.billId)!.name}))].filter(d=>d.remaining>0).sort((a,b)=>a.dueDate.localeCompare(b.dueDate)||a.id.localeCompare(b.id));
  t.tenantId=tenantId;
  const debts=allDebts.filter(d=>d.dueDate<=addDays(eligibilityDate,s.settings.earlyDays));

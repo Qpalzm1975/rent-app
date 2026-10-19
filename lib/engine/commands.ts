@@ -2,8 +2,8 @@ import { z } from 'zod';
 import type { State } from './types';
 import { addDays, localDate, validDate } from './dates';
 import { cents, splitBill } from './money';
-import { allocate, audit, generateRent, id, paid, reconcileNotifications, unmatch } from './ledger';
-import { matchAll, normalise } from './matching';
+import { allocate, audit, generateRent, id, paid, reconcileNotifications, retireChangedObligations, unmatch } from './ledger';
+import { matchAll, normalise, requireDistinctive } from './matching';
 const text=z.string().trim().min(1).max(180),date=z.string().refine(validDate,'Enter a valid date'),amount=z.string().refine(v=>{try{return cents(v)>0}catch{return false}},'Enter a positive amount with at most two decimal places'),uuid=z.string().uuid();
 const actionSchema=z.discriminatedUnion('type',[
  z.object({type:z.literal('property'),name:text,address:z.string().max(300)}),
@@ -39,10 +39,10 @@ export function executeCommand(s:State,input:unknown,now=new Date()):State{
  case 'property':entity=id();s.properties.push({id:entity,name:a.name,address:a.address,archived:false});break;
  case 'room':required(s.properties.find(p=>p.id===a.propertyId));if(s.rooms.some(r=>r.propertyId===a.propertyId&&normalise(r.name)===normalise(a.name)))throw new Error('Room name already exists.');entity=id();s.rooms.push({id:entity,propertyId:a.propertyId,name:a.name,archived:false});break;
  case 'tenant':{
-  required(s.rooms.find(r=>r.id===a.roomId));if(a.endDate&&a.endDate<a.startDate)throw new Error('Move-out must follow move-in.');if(a.startDate<addDays(today,-3650))throw new Error('Initial history is limited to ten years.');
+  required(s.rooms.find(r=>r.id===a.roomId));if(a.endDate&&a.endDate<a.startDate)throw new Error('Move-out must follow move-in.');for(const text of a.aliases)requireDistinctive(text,'The alias');if(a.startDate<addDays(today,-3650))throw new Error('Initial history is limited to ten years.');
   if(s.tenancies.some(t=>t.roomId===a.roomId&&(!t.endDate||t.endDate>=a.startDate)&&(!a.endDate||t.startDate<=a.endDate)))throw new Error('Another tenancy occupies this room during those dates.');
   entity=id();s.tenants.push({id:entity,name:a.name,email:a.email,notes:a.notes,active:true});const tid=id();s.tenancies.push({id:tid,tenantId:entity,roomId:a.roomId,startDate:a.startDate,endDate:a.endDate,paymentDay:a.paymentDay,graceDays:a.graceDays,active:true});s.rentRates.push({id:id(),tenancyId:tid,effectiveDate:a.startDate,weeklyCents:cents(a.weeklyRent),createdAt:now.toISOString()});for(const text of a.aliases)s.aliases.push({id:id(),tenantId:entity,text,active:true});generateRent(s,now);break;}
- case 'editTenant':{const t=required(s.tenants.find(t=>t.id===a.tenantId));entity=t.id;Object.assign(t,{name:a.name,email:a.email,notes:a.notes,active:a.active});s.aliases.filter(x=>x.tenantId===t.id).forEach(x=>x.active=false);a.aliases.forEach(text=>s.aliases.push({id:id(),tenantId:t.id,text,active:true}));break;}
+ case 'editTenant':{const t=required(s.tenants.find(t=>t.id===a.tenantId));entity=t.id;for(const text of a.aliases)requireDistinctive(text,'The alias');Object.assign(t,{name:a.name,email:a.email,notes:a.notes,active:a.active});s.aliases.filter(x=>x.tenantId===t.id).forEach(x=>x.active=false);a.aliases.forEach(text=>s.aliases.push({id:id(),tenantId:t.id,text,active:true}));break;}
  case 'rate':{
   const t=required(s.tenancies.find(t=>t.id===a.tenancyId));entity=t.id;if(a.effectiveDate<today||a.effectiveDate<t.startDate)throw new Error('Use an effective date from today onward; historical rates cannot be rewritten.');
   if(s.rentRates.some(r=>r.tenancyId===t.id&&r.effectiveDate===a.effectiveDate))throw new Error('A rate already exists for this date.');
@@ -51,21 +51,24 @@ export function executeCommand(s:State,input:unknown,now=new Date()):State{
  case 'moveOut':{
   const t=required(s.tenancies.find(t=>t.id===a.tenancyId));entity=t.id;if(a.endDate<t.startDate)throw new Error('Move-out precedes move-in.');
   if(s.rents.some(r=>r.active&&r.tenancyId===t.id&&r.periodEnd>a.endDate&&paid(s,'rent',r.id)>0))throw new Error('Unmatch affected prepaid rent first, then record the move-out.');
-  t.endDate=a.endDate;t.active=a.endDate>=today;const tenant=required(s.tenants.find(x=>x.id===t.tenantId));tenant.active=t.active;
-  for(const r of s.rents.filter(r=>r.active&&r.tenancyId===t.id&&r.periodEnd>a.endDate)){r.active=false;audit(s,'rent_obligation_superseded',r.id,'Tenancy ended; original obligation retained.','owner',now);}generateRent(s,now);break;}
+  // A later date (an extension or a corrected move-out) also changes the
+  // previously prorated final week, so recheck from the earlier of the two dates.
+  const previousEnd=t.endDate,from=previousEnd&&previousEnd<a.endDate?previousEnd:a.endDate;
+  t.endDate=a.endDate;t.active=a.endDate>=today;const tenant=required(s.tenants.find(x=>x.id===t.tenantId));tenant.active=s.tenancies.some(x=>x.tenantId===tenant.id&&x.active);
+  retireChangedObligations(s,t.id,from,now);generateRent(s,now);break;}
  case 'bill':{
   required(s.properties.find(p=>p.id===a.propertyId));if(a.dueDate<a.billDate)throw new Error('The due date cannot precede the bill date.');entity=id();s.bills.push({id:entity,propertyId:a.propertyId,name:a.name,category:a.category,supplier:a.supplier,supplierAlias:a.supplierAlias,amountCents:cents(a.amount),billDate:a.billDate,dueDate:a.dueDate,notes:a.notes,divider:a.divider,ownerShareCents:0,active:true,createdAt:now.toISOString()});addShares(s,entity,a.tenantIds,a.divider);break;}
  case 'resplitBill':{
   const b=required(s.bills.find(b=>b.id===a.billId));entity=b.id;const shares=s.billShares.filter(x=>x.active&&x.billId===b.id);if(shares.some(x=>paid(s,'reimbursement',x.id)>0))throw new Error('Unmatch reimbursements before changing this bill split.');shares.forEach(x=>x.active=false);addShares(s,b.id,a.tenantIds,a.divider);break;}
  case 'allocate':{
-  entity=a.transactionId;if(a.replace)unmatch(s,a.transactionId,a.reason,now);
+  entity=a.transactionId;if(a.remember)requireDistinctive(a.remember,'The remembered reference');if(a.replace)unmatch(s,a.transactionId,a.reason,now);
   allocate(s,a.transactionId,a.allocations.map(i=>({...i,amountCents:cents(i.amount)})),'manual',[a.reason],now);
   if(a.remember){const t=required(s.transactions.find(t=>t.id===a.transactionId));if(!t.tenantId)throw new Error('Only tenant payments can create a tenant rule.');if(a.remember.trim().length<3)throw new Error('A remembered reference must have at least three characters.');s.rules.push({id:id(),tenantId:t.tenantId,text:a.remember,field:'any',mode:'contains',enabled:true,createdAt:now.toISOString()});}break;}
  case 'unmatch':entity=a.transactionId;unmatch(s,a.transactionId,a.reason,now);break;
  case 'ignore':{const t=required(s.transactions.find(t=>t.id===a.transactionId));entity=t.id;if(a.ignored){if(s.allocations.some(x=>x.active&&x.transactionId===t.id))throw new Error('Unmatch this transaction before ignoring it.');t.tenantId=null;t.status='Ignored';}else t.status='Unmatched';t.ignored=a.ignored;t.autoMatchDisabled=a.ignored;s.notifications.filter(n=>n.key===`review:${t.id}`).forEach(n=>n.resolved=true);break;}
  case 'retryMatch':{const t=required(s.transactions.find(t=>t.id===a.transactionId));entity=t.id;t.autoMatchDisabled=false;t.ignored=false;t.status='Unmatched';break;}
  case 'waive':{const o=required(a.kind==='rent'?s.rents.find(r=>r.id===a.targetId):s.billShares.find(r=>r.id===a.targetId));entity=o.id;if(paid(s,a.kind,o.id)>0)throw new Error('Unmatch allocations before waiving an obligation.');o.waived=a.waived;o.waiverReason=a.waived?a.reason:null;break;}
- case 'rule':{required(s.tenants.find(t=>t.id===a.tenantId));entity=a.id??id();const old=s.rules.find(r=>r.id===entity);const row={id:entity,tenantId:a.tenantId,text:a.text,field:a.field,mode:a.mode,enabled:a.enabled,createdAt:old?.createdAt??now.toISOString()};if(old)Object.assign(old,row);else s.rules.push(row);break;}
+ case 'rule':{required(s.tenants.find(t=>t.id===a.tenantId));if(a.enabled)requireDistinctive(a.text,'The rule text');entity=a.id??id();const old=s.rules.find(r=>r.id===entity);const row={id:entity,tenantId:a.tenantId,text:a.text,field:a.field,mode:a.mode,enabled:a.enabled,createdAt:old?.createdAt??now.toISOString()};if(old)Object.assign(old,row);else s.rules.push(row);break;}
  case 'settings':try{new Intl.DateTimeFormat('en-AU',{timeZone:a.timezone}).format(now);}catch{throw new Error('Enter a valid IANA time zone.');}if(a.setupComplete&&(!s.properties.length||!s.tenants.length||!s.accounts.some(a=>a.selected)))throw new Error('Add the property, a tenant, and a selected live bank account first.');s.settings={...s.settings,...a};delete (s.settings as unknown as Record<string,unknown>).type;s.user.timezone=a.timezone;break;
  case 'selectAccount':{const account=required(s.accounts.find(x=>x.id===a.accountId));required(s.properties.find(p=>p.id===a.propertyId));entity=account.id;if(account.propertyId&&account.propertyId!==a.propertyId&&s.transactions.some(t=>t.accountId===account.id))throw new Error('An account with imported history cannot be reassigned to another property.');account.selected=a.selected;account.propertyId=a.propertyId;break;}
  case 'readNotifications':s.notifications.forEach(n=>n.read=true);break;
