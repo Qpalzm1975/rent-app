@@ -1,11 +1,12 @@
-# Verifies every push: frozen install with the pinned pnpm, typecheck, the
-# financial/banking/sync/PostgreSQL tests, lint, the Vercel production build and
-# an HTTP smoke test of that build. Mock-based tests are not evidence of a live
-# bank connection.
+# Verifies main on every push, pull requests, and (through branch-checks.yml,
+# after the lockfile refresh) every working-branch push: frozen install with the
+# pinned pnpm, typecheck, the financial/banking/sync/PostgreSQL tests, lint, the
+# Vercel production build and an HTTP smoke test of that build. Mock-based tests
+# are not evidence of a live bank connection.
 name: CI
 on:
   push:
-    branches: [main, 'claude/**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -42,6 +43,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
+          # setup-node v5 otherwise tries to cache pnpm's store (named by the
+          # "packageManager" field) before pnpm is installed, and fails.
+          package-manager-cache: false
       - name: Install pnpm ${{ env.PNPM_VERSION }}
         run: npm install --global "pnpm@${PNPM_VERSION}"
       - name: Install dependencies (frozen lockfile)

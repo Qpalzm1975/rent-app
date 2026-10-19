@@ -1,18 +1,19 @@
-# Regenerates pnpm-lock.yaml with the pinned pnpm when package.json or
-# pnpm-workspace.yaml changes on a working branch, commits it to that branch,
-# then runs the full CI against the resulting commit. (Commits pushed with
-# GITHUB_TOKEN do not trigger other workflows, so CI is called directly.)
-name: Refresh lockfile
+# Verifies every push to a working branch (claude/**). First it brings
+# pnpm-lock.yaml up to date with the pinned pnpm (a no-op unless package.json or
+# pnpm-workspace.yaml changed) and commits it to the branch; then it runs the
+# full CI against the resulting commit. Commits pushed with GITHUB_TOKEN do not
+# trigger other workflows, so CI is called directly. main is verified by ci.yml.
+name: Branch checks
 on:
   workflow_dispatch:
   push:
     branches: ['claude/**']
-    paths: [package.json, pnpm-workspace.yaml]
 concurrency:
-  group: lockfile-${{ github.ref }}
+  group: branch-checks-${{ github.ref }}
   cancel-in-progress: false
 jobs:
-  refresh:
+  lockfile:
+    name: Refresh lockfile
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -26,6 +27,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          # setup-node v5 otherwise tries to cache pnpm's store (named by the
+          # "packageManager" field) before pnpm is installed, and fails.
+          package-manager-cache: false
       - name: Install pnpm 11.25.0
         run: npm install --global pnpm@11.25.0
       - name: Resolve dependencies into pnpm-lock.yaml
@@ -44,9 +48,10 @@ jobs:
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   verify:
-    needs: refresh
+    name: CI
+    needs: lockfile
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
     with:
-      ref: ${{ needs.refresh.outputs.sha }}
+      ref: ${{ needs.lockfile.outputs.sha }}

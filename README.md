@@ -20,7 +20,7 @@ A single-owner rental ledger for Australian room rentals. Functional Next.js 16.
 - `pnpm build` — Sites-compatible Vinext preview build; **not** the Vercel build command.
 - `pnpm typecheck` — TypeScript check.
 - `pnpm test` — financial, banking-contract, webhook, sync-orchestration and PostgreSQL integration tests.
-- GitHub Actions (`.github/workflows/ci.yml`) runs install, typecheck, tests, lint, the production build and an HTTP smoke test on every push.
+- GitHub Actions runs install, typecheck, tests, lint, the production build and an HTTP smoke test on every push: `.github/workflows/ci.yml` for `main` and pull requests, and `.github/workflows/branch-checks.yml` for working branches (it refreshes `pnpm-lock.yaml` first, then runs the same CI).
 - `node scripts/password-hash.mjs` — generate the single-owner password hash via hidden terminal input.
 - `node scripts/configure-redbark.mjs` — interactive one-time provider destination/sync setup; credentials are read from the environment.
 
