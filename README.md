@@ -31,7 +31,7 @@ The Sites build is a private, owner-visible preview of the same app. Production 
 - Properties, rooms, tenants, dated tenancies and immutable rent-rate history.
 - Monday-default weekly rent generation; early/late payments, partial and combined payments, prepaid weeks and tenant credits. Identified money held as credit pays later obligations as they fall due, oldest first.
 - Fixed-precision integer cents; exact bill division including owner/vacant shares.
-- Outgoing bill payments and incoming tenant reimbursements tracked separately.
+- Outgoing bill payments and incoming tenant reimbursements tracked separately. Bills can be re-split, have their details and dates corrected, or be voided with a reason (once any linked bank payments are unmatched); the audit trail keeps the original.
 - Posted-transaction ingestion, stable provider/account deduplication, pending visibility (pending rows the bank stops reporting become “Pending ended”), changed-transaction quarantine. Foreign-currency rows are left out of the AUD ledger rather than stopping the feed.
 - Conservative deterministic identity matching from aliases, editable rules, prior manually confirmed references, amount/date context and existing allocations. Ambiguity goes to review.
 - Manual confirmation, rejection, splitting, unmatching, rematching, ignore/restore, remembered rules and waivers with reasons.

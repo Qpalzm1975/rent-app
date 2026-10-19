@@ -16,12 +16,13 @@ Session of 19 October 2026, on top of the 29 September checkpoint `c336614`:
 | Patch Next.js/React security advisories, pin pnpm for Vercel, add CI | Next.js 16.4.1 / React 19.2.9 (14 October 2026 release; 16.0.0–16.4.0 affected), sharp 0.35.5; Vercel install/build pinned to pnpm 11.25.0; GitHub Actions CI and a lockfile-refresh workflow. |
 | Update documentation and add a status note | This file and the guides in `docs/`. |
 | Support Supabase secret keys and finish the consent return | Supabase's new `sb_secret_…` keys are sent only in the `apikey` header (legacy `service_role` keys, retired by Supabase at the end of 2026, keep working); returning from Redbark's consent page fetches the new accounts automatically or explains a failed consent. |
+| Allow correcting and voiding bills | A bill entered with a mistake could not be corrected or removed. Its details and dates can now be edited, and it can be voided with a reason once linked payments are unmatched; both are audited and checked against the PostgreSQL schema. |
 
 ## Verified
 
 **In this environment (19 October 2026).** It could not download npm packages, so checks used locally available tools:
 
-- `node --conditions=react-server --import tsx --test tests/*.test.ts`: **72 tests pass** — 33 financial (including the acceptance scenario below), 11 banking-contract/webhook/ingestion, 9 sync-orchestration and Supabase-header checks (Supabase RPC and Redbark API faked in memory) and 19 PostgreSQL checks.
+- `node --conditions=react-server --import tsx --test tests/*.test.ts`: **74 tests pass** — 34 financial (including the acceptance scenario below), 11 banking-contract/webhook/ingestion, 9 sync-orchestration and Supabase-header checks (Supabase RPC and Redbark API faked in memory) and 20 PostgreSQL checks.
 - The PostgreSQL checks ran against a **real PostgreSQL 16.15 server**, applying both migrations in order, through a `psql`-backed stand-in for PGlite. CI runs the same file with PGlite.
 - Strict TypeScript check of `lib/engine`, `lib/bank`, the sync/database server modules and all tests; a stubbed check of the changed UI and API routes; every changed TSX file parses.
 
@@ -53,7 +54,7 @@ In order; [DEPLOYMENT.md](DEPLOYMENT.md) has the detail. Never put a banking pas
 ## Known limitations
 
 - No opening-balance entry: existing arrears or credit at setup cannot be recorded; weeks before the bank history can be waived with a reason.
-- A bill's amount, dates or supplier cannot be edited or voided after creation (only re-split or waived per share).
+- A bill's amount cannot be changed in place: void it (with a reason) and enter it again. Its details and dates can be edited.
 - A tenant cannot be given a second tenancy (room move) from the UI, and a tenancy's payment day and grace period cannot be edited after creation.
 - Any change the provider makes to a posted transaction, including text-only changes, reverses its allocations and sends it to review. This is deliberately conservative.
 - Notifications are in-app only; no email or push delivery.

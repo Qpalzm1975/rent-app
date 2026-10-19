@@ -14,6 +14,8 @@ const actionSchema=z.discriminatedUnion('type',[
  z.object({type:z.literal('moveOut'),tenancyId:uuid,endDate:date}),
  z.object({type:z.literal('bill'),name:text,category:text,supplier:text,supplierAlias:z.string().max(180),propertyId:uuid,amount:amount,billDate:date,dueDate:date,notes:z.string().max(4000).default(''),tenantIds:z.array(uuid).max(50),divider:z.number().int().min(1).max(100)}),
  z.object({type:z.literal('resplitBill'),billId:uuid,tenantIds:z.array(uuid).max(50),divider:z.number().int().min(1).max(100)}),
+ z.object({type:z.literal('editBill'),billId:uuid,name:text,category:text,supplier:text,supplierAlias:z.string().max(180),billDate:date,dueDate:date,notes:z.string().max(4000).default('')}),
+ z.object({type:z.literal('voidBill'),billId:uuid,reason:z.string().trim().min(3).max(300)}),
  z.object({type:z.literal('allocate'),transactionId:uuid,replace:z.boolean().default(false),reason:z.string().min(3).max(300),remember:z.string().max(120).default(''),allocations:z.array(z.object({kind:z.enum(['rent','reimbursement','expense','other_income','other_expense']),targetId:uuid.optional(),tenantId:uuid.optional(),propertyId:uuid.optional(),amount:z.string(),category:z.string().max(100).optional()})).min(1).max(50)}),
  z.object({type:z.literal('unmatch'),transactionId:uuid,reason:z.string().min(3).max(300)}),
  z.object({type:z.literal('ignore'),transactionId:uuid,ignored:z.boolean()}),
@@ -60,6 +62,16 @@ export function executeCommand(s:State,input:unknown,now=new Date()):State{
   required(s.properties.find(p=>p.id===a.propertyId));if(a.dueDate<a.billDate)throw new Error('The due date cannot precede the bill date.');entity=id();s.bills.push({id:entity,propertyId:a.propertyId,name:a.name,category:a.category,supplier:a.supplier,supplierAlias:a.supplierAlias,amountCents:cents(a.amount),billDate:a.billDate,dueDate:a.dueDate,notes:a.notes,divider:a.divider,ownerShareCents:0,active:true,createdAt:now.toISOString()});addShares(s,entity,a.tenantIds,a.divider);break;}
  case 'resplitBill':{
   const b=required(s.bills.find(b=>b.id===a.billId));entity=b.id;const shares=s.billShares.filter(x=>x.active&&x.billId===b.id);if(shares.some(x=>paid(s,'reimbursement',x.id)>0))throw new Error('Unmatch reimbursements before changing this bill split.');shares.forEach(x=>x.active=false);addShares(s,b.id,a.tenantIds,a.divider);break;}
+ case 'editBill':{
+  // Descriptive details and dates only; the amount and split stay as issued (void and re-enter a wrong amount).
+  const b=required(s.bills.find(b=>b.id===a.billId&&b.active),'Bill not found.');entity=b.id;if(a.dueDate<a.billDate)throw new Error('The due date cannot precede the bill date.');
+  const before={name:b.name,category:b.category,supplier:b.supplier,supplierAlias:b.supplierAlias,billDate:b.billDate,dueDate:b.dueDate};Object.assign(b,{name:a.name,category:a.category,supplier:a.supplier,supplierAlias:a.supplierAlias,billDate:a.billDate,dueDate:a.dueDate,notes:a.notes});
+  for(const sh of s.billShares.filter(x=>x.active&&x.billId===b.id&&paid(s,'reimbursement',x.id)<x.amountCents))sh.dueDate=a.dueDate;
+  audit(s,'bill_edited',b.id,JSON.stringify({before,after:{name:b.name,category:b.category,supplier:b.supplier,supplierAlias:b.supplierAlias,billDate:b.billDate,dueDate:b.dueDate}}),'owner',now);break;}
+ case 'voidBill':{
+  const b=required(s.bills.find(b=>b.id===a.billId&&b.active),'Bill not found.');entity=b.id;const shares=s.billShares.filter(x=>x.active&&x.billId===b.id);
+  if(paid(s,'expense',b.id)>0||shares.some(x=>paid(s,'reimbursement',x.id)>0))throw new Error('Unmatch the bank payments linked to this bill first, then void it.');
+  b.active=false;shares.forEach(x=>x.active=false);audit(s,'bill_voided',b.id,a.reason,'owner',now);break;}
  case 'allocate':{
   entity=a.transactionId;if(a.remember)requireDistinctive(a.remember,'The remembered reference');if(a.replace)unmatch(s,a.transactionId,a.reason,now);
   allocate(s,a.transactionId,a.allocations.map(i=>({...i,amountCents:cents(i.amount)})),'manual',[a.reason],now);
