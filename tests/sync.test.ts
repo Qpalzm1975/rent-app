@@ -4,7 +4,7 @@ import {emptyState,type State} from '../lib/engine/types';
 import {executeCommand} from '../lib/engine/commands';
 import {paid} from '../lib/engine/ledger';
 import {addDays,localDate,weekStart} from '../lib/engine/dates';
-import {mutate} from '../lib/server/database';
+import {mutate,supabaseHeaders} from '../lib/server/database';
 import {refreshDirectory,runSync} from '../lib/server/sync';
 // runSync() talks to Supabase (PostgREST RPC) and Redbark over fetch. Both are
 // faked in memory, so this exercises the real orchestration without credentials.
@@ -48,3 +48,4 @@ test('scheduled sync against faked Supabase and Redbark',async t=>{
  await t.test('recorded webhook events raise Redbark delivery notices and are marked processed',async()=>{await mutate(x=>{x.webhookEvents.push({id:crypto.randomUUID(),providerEventId:'evt_disabled',type:'destination.disabled',receivedAt:new Date().toISOString(),processedAt:null});});await runSync();assert.ok(state().notifications.some(n=>n.key==='bank:redbark-destination'&&!n.resolved));assert.ok(state().webhookEvents.every(e=>e.processedAt));});
  await t.test('without a Redbark key, rent is still generated and the run says why it skipped the bank',async()=>{delete process.env.REDBARK_API_KEY;try{const r=await runSync();assert.equal(r.reason,'bank_not_configured');assert.ok(state().rents.length>=3);}finally{process.env.REDBARK_API_KEY='rbk_test_key';}});
 });
+test('Supabase secret keys go only in the apikey header; legacy service_role JWTs also as a bearer token',()=>{assert.deepEqual(Object.keys(supabaseHeaders('sb_secret_example')).sort(),['Content-Type','apikey']);assert.equal(supabaseHeaders('eyJhbGciOiJIUzI1NiJ9.legacy.sig').Authorization,'Bearer eyJhbGciOiJIUzI1NiJ9.legacy.sig');});

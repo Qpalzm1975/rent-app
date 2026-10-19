@@ -15,12 +15,13 @@ Session of 19 October 2026, on top of the 29 September checkpoint `c336614`:
 | Add bank disconnect, report drill-down and clearer setup guidance | In-app Disconnect (withdraws consent, keeps history); report figures filter their underlying rows; tenant start-date guidance for existing tenants. |
 | Patch Next.js/React security advisories, pin pnpm for Vercel, add CI | Next.js 16.4.1 / React 19.2.9 (14 October 2026 release; 16.0.0–16.4.0 affected), sharp 0.35.5; Vercel install/build pinned to pnpm 11.25.0; GitHub Actions CI and a lockfile-refresh workflow. |
 | Update documentation and add a status note | This file and the guides in `docs/`. |
+| Support Supabase secret keys and finish the consent return | Supabase's new `sb_secret_…` keys are sent only in the `apikey` header (legacy `service_role` keys, retired by Supabase at the end of 2026, keep working); returning from Redbark's consent page fetches the new accounts automatically or explains a failed consent. |
 
 ## Verified
 
 **In this environment (19 October 2026).** It could not download npm packages, so checks used locally available tools:
 
-- `node --conditions=react-server --import tsx --test tests/*.test.ts`: **71 tests pass** — 33 financial (including the acceptance scenario below), 11 banking-contract/webhook/ingestion, 8 sync-orchestration (Supabase RPC and Redbark API faked in memory) and 19 PostgreSQL checks.
+- `node --conditions=react-server --import tsx --test tests/*.test.ts`: **72 tests pass** — 33 financial (including the acceptance scenario below), 11 banking-contract/webhook/ingestion, 9 sync-orchestration and Supabase-header checks (Supabase RPC and Redbark API faked in memory) and 19 PostgreSQL checks.
 - The PostgreSQL checks ran against a **real PostgreSQL 16.15 server**, applying both migrations in order, through a `psql`-backed stand-in for PGlite. CI runs the same file with PGlite.
 - Strict TypeScript check of `lib/engine`, `lib/bank`, the sync/database server modules and all tests; a stubbed check of the changed UI and API routes; every changed TSX file parses.
 
@@ -40,7 +41,7 @@ The acceptance scenario: Sarah $250, Tom $260, Jack $240, Emily $250, all due Mo
 
 In order; [DEPLOYMENT.md](DEPLOYMENT.md) has the detail. Never put a banking password, API key or secret into chat or source code.
 
-1. **Supabase:** create a project in Sydney; run both files in `supabase/migrations/` in order. Copy the project URL and service-role key. The free plan is fine for setup and testing, but it has no automated backups; for real financial records use a plan with backups or keep your own scheduled dump (see OPERATIONS.md).
+1. **Supabase:** create a project in Sydney; run both files in `supabase/migrations/` in order. Copy the project URL and a secret key (`sb_secret_…`) for `SUPABASE_SERVICE_ROLE_KEY`. The free plan is fine for setup and testing, but it has no automated backups; for real financial records use a plan with backups or keep your own scheduled dump (see OPERATIONS.md).
 2. **Secrets:** run `node scripts/password-hash.mjs` for `OWNER_PASSWORD_HASH`; generate `SESSION_SECRET` and `CRON_SECRET` with `openssl rand -hex 32`.
 3. **Redbark:** sign up (Developer plan or trial), create the runtime API key with `data:read` and `connections:write`.
 4. **Vercel:** import the GitHub repository, add the environment variables from `.env.example`, deploy, and set `APP_ORIGIN` to the final URL.

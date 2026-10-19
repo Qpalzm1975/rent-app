@@ -3,10 +3,14 @@ import type { State } from '../engine/types';
 import { emptyState } from '../engine/types';
 import { env } from './env';
 export class DatabaseError extends Error{constructor(public code:string,message:string){super(message);}}
+// Supabase secret keys (sb_secret_…) are not JWTs and belong only in the apikey
+// header; Supabase is retiring the legacy service_role JWT (also accepted here,
+// sent as a bearer token as before) by the end of 2026.
+export function supabaseHeaders(key:string):Record<string,string>{return key.startsWith('sb_')?{'Content-Type':'application/json',apikey:key}:{'Content-Type':'application/json',apikey:key,Authorization:`Bearer ${key}`};}
 export async function rpc<T>(name:string,args:Record<string,unknown>):Promise<T>{
  const url=env('SUPABASE_URL'),key=env('SUPABASE_SERVICE_ROLE_KEY');if(!url||!key)throw new DatabaseError('not_configured','Add your Supabase server credentials before saving financial records.');
  if(!url.startsWith('https://')&&process.env.NODE_ENV==='production')throw new Error('The database must use HTTPS.');
- const r=await fetch(`${url.replace(/\/$/,'')}/rest/v1/rpc/${name}`,{method:'POST',headers:{'Content-Type':'application/json',apikey:key,Authorization:`Bearer ${key}`},body:JSON.stringify(args),cache:'no-store',signal:AbortSignal.timeout(20000)});
+ const r=await fetch(`${url.replace(/\/$/,'')}/rest/v1/rpc/${name}`,{method:'POST',headers:supabaseHeaders(key),body:JSON.stringify(args),cache:'no-store',signal:AbortSignal.timeout(20000)});
  if(!r.ok){const e=await r.json().catch(()=>({})) as {code?:string};if(e.code==='40001')throw new DatabaseError('revision_conflict','The ledger changed. Please retry.');throw new DatabaseError(e.code??'database_error','The database could not complete the request. Check migrations and server configuration.');}
  return await r.json() as T;
 }

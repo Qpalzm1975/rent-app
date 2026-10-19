@@ -6,7 +6,7 @@
 |---|---|---|
 | Supabase project, preferably Sydney | Durable PostgreSQL ledger | Apply every file in `supabase/migrations/`, in name order, in its SQL editor (or `supabase db push`) |
 | Supabase Project URL | HTTPS server database endpoint | `SUPABASE_URL` on Vercel |
-| Supabase service-role API key | Server-only database RPC access | `SUPABASE_SERVICE_ROLE_KEY` on Vercel; never in browser code |
+| Supabase secret key (`sb_secret_…`; the legacy `service_role` key also works until Supabase retires it at the end of 2026) | Server-only database RPC access | `SUPABASE_SERVICE_ROLE_KEY` on Vercel; never in browser code. Never use the publishable/anon key here |
 | Vercel project | Next.js HTTPS host reachable by Redbark | Import the GitHub repository; the included `vercel.json` pins the install/build |
 | A unique 16+ character owner password | Single-user authentication | Run `node scripts/password-hash.mjs` locally; put only the resulting full hash in `OWNER_PASSWORD_HASH` |
 | Two independent random secrets | Session signing and job authentication | Generate each with `openssl rand -hex 32`; set `SESSION_SECRET` and `CRON_SECRET` |
