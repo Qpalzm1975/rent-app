@@ -55,7 +55,7 @@ jobs:
       - name: Tests (financial, banking, sync, PostgreSQL via PGlite)
         run: bash .github/scripts/step.sh test pnpm test
       - name: Lint
-        run: bash .github/scripts/step.sh lint pnpm lint
+        run: node .github/scripts/lint-report.mjs
       - name: Production build (Vercel path)
         run: bash .github/scripts/step.sh build pnpm build:vercel
       - name: Production server smoke test
