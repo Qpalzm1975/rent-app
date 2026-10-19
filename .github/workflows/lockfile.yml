@@ -1,0 +1,52 @@
+# Regenerates pnpm-lock.yaml with the pinned pnpm when package.json or
+# pnpm-workspace.yaml changes on a working branch, commits it to that branch,
+# then runs the full CI against the resulting commit. (Commits pushed with
+# GITHUB_TOKEN do not trigger other workflows, so CI is called directly.)
+name: Refresh lockfile
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths: [package.json, pnpm-workspace.yaml]
+concurrency:
+  group: lockfile-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install pnpm 11.25.0
+        run: npm install --global pnpm@11.25.0
+      - name: Resolve dependencies into pnpm-lock.yaml
+        run: bash .github/scripts/step.sh lockfile pnpm install --lockfile-only --no-frozen-lockfile
+      - name: Commit the refreshed lockfile
+        id: commit
+        run: |
+          if git diff --quiet -- pnpm-lock.yaml; then
+            echo "pnpm-lock.yaml is already current."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add pnpm-lock.yaml
+            git commit -m "Refresh pnpm-lock.yaml for updated dependencies"
+            git push
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: refresh
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.refresh.outputs.sha }}

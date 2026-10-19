@@ -1,6 +1,7 @@
 {
   "framework": "nextjs",
-  "buildCommand": "pnpm build:vercel",
+  "installCommand": "npx --yes pnpm@11.25.0 install --frozen-lockfile",
+  "buildCommand": "npx --yes pnpm@11.25.0 run build:vercel",
   "regions": ["syd1"],
   "functions": { "app/api/**/route.ts": { "maxDuration": 300 } },
   "crons": [{ "path": "/api/jobs/run", "schedule": "*/30 * * * *" }]

@@ -1,0 +1,58 @@
+# Verifies every push: frozen install with the pinned pnpm, typecheck, the
+# financial/banking/sync/PostgreSQL tests, lint, the Vercel production build and
+# an HTTP smoke test of that build. Mock-based tests are not evidence of a live
+# bank connection.
+name: CI
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit or branch to verify (defaults to the triggering commit)
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      ref:
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    name: Verify (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      PNPM_VERSION: 11.25.0
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install pnpm ${{ env.PNPM_VERSION }}
+        run: npm install --global "pnpm@${PNPM_VERSION}"
+      - name: Install dependencies (frozen lockfile)
+        run: bash .github/scripts/step.sh install pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: bash .github/scripts/step.sh typecheck pnpm typecheck
+      - name: Tests (financial, banking, sync, PostgreSQL via PGlite)
+        run: bash .github/scripts/step.sh test pnpm test
+      - name: Lint
+        run: bash .github/scripts/step.sh lint pnpm lint
+      - name: Production build (Vercel path)
+        run: bash .github/scripts/step.sh build pnpm build:vercel
+      - name: Production server smoke test
+        run: bash .github/scripts/step.sh smoke node scripts/http-smoke.mjs

@@ -1,6 +1,19 @@
 # Copied Sites are standalone projects and cannot inherit the monorepo policy.
 minimumReleaseAge: 10080
 minimumReleaseAgeIgnoreMissingTime: false
+# Security release of 2026-10-14 (Next.js CVE-2026-96889 and the related React
+# Server Components advisories). These exact patched versions are exempt from the
+# seven-day age rule so the fix is not delayed; the exemption can be removed once
+# they are older than seven days (from 2026-10-21).
+minimumReleaseAgeExclude:
+  - next@16.4.1
+  - eslint-config-next@16.4.1
+  - react@19.2.9
+  - react-dom@19.2.9
+  - react-server-dom-webpack@19.2.9
+  - sharp@0.35.5
+  - '@next/*'
+  - '@img/*'
 trustLockfile: false
 strictDepBuilds: true
 allowBuilds:
@@ -18,4 +31,4 @@ packageImportMethod: clone-or-copy
 verifyDepsBeforeRun: false
 optimisticRepeatInstall: false
 overrides:
-  miniflare>sharp: 0.35.4
+  miniflare>sharp: 0.35.5
